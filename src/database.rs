@@ -8,13 +8,13 @@ use std::{
 use tokio::fs;
 
 #[derive(Serialize, Deserialize)]
-pub struct Database {
+pub(crate) struct Database {
     path: PathBuf,
     guilds: HashMap<GuildId, HashSet<RoleId>>,
 }
 
 impl Database {
-    pub async fn load() -> anyhow::Result<Self> {
+    pub(crate) async fn load() -> anyhow::Result<Self> {
         let path = path()?;
         if path.exists() {
             return Self::read(path).await;
@@ -42,11 +42,11 @@ impl Database {
         Ok(Database { path, guilds })
     }
 
-    pub async fn guild_roles(&mut self, guild: GuildId) -> &HashSet<RoleId> {
+    pub(crate) async fn guild_roles(&mut self, guild: GuildId) -> &HashSet<RoleId> {
         self.guilds.entry(guild).or_default()
     }
 
-    pub async fn toggle_role(&mut self, guild: GuildId, role: RoleId) -> anyhow::Result<()> {
+    pub(crate) async fn toggle_role(&mut self, guild: GuildId, role: RoleId) -> anyhow::Result<()> {
         let guild_roles = self.guilds.entry(guild).or_default();
         if guild_roles.contains(&role) {
             guild_roles.remove(&role);
