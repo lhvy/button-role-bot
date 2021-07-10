@@ -39,12 +39,9 @@ impl EventHandler for Handler {
 
                 if let ApplicationCommandInteractionDataOptionValue::Role(role) = option_value {
                     if let Some(guild) = interaction.guild_id {
-                        self.database
-                            .lock()
-                            .await
-                            .toggle_role(guild, role.id)
-                            .await
-                            .unwrap();
+                        let mut database = self.database.lock().await;
+                        database.toggle_role(guild, role.id).await.unwrap();
+
                         format!("Toggled button for {} role.", role.name)
                     } else {
                         "This command can only be used in servers.".to_string()
