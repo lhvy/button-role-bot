@@ -1,9 +1,10 @@
 use crate::database::Database;
 use serenity::{
+    builder::CreateComponents,
     client::Context,
     model::{
         gateway::Ready,
-        id::{GuildId, RoleId},
+        id::{ChannelId, GuildId, RoleId},
         interactions::{
             ApplicationCommandInteractionDataOptionValue, ApplicationCommandOptionType,
             ButtonStyle, Interaction, InteractionApplicationCommandCallbackDataFlags,
@@ -17,16 +18,19 @@ use tokio::sync::Mutex;
 pub struct Handler {
     database: Mutex<Database>,
     guild_id: GuildId,
+    channel_id: ChannelId,
 }
 
 impl Handler {
     pub async fn new() -> anyhow::Result<Self> {
         let database = Database::load().await?;
         let guild_id = GuildId(env::var("GUILD_ID")?.parse()?);
+        let channel_id = ChannelId(env::var("CHANNEL_ID")?.parse()?);
 
         Ok(Self {
             database: Mutex::new(database),
             guild_id,
+            channel_id,
         })
     }
 
@@ -93,9 +97,6 @@ impl Handler {
                         let mut database = self.database.lock().await;
                         database.toggle_role(guild, role.id).await?;
 
-                        // we know there will be a channel ID since there is a guild ID
-                        let channel_id = interaction.channel_id.unwrap();
-
                         let roles = {
                             let guild_roles = database.guild_roles(self.guild_id);
                             let mut roles = Vec::with_capacity(guild_roles.len());
@@ -106,30 +107,53 @@ impl Handler {
                             roles
                         };
 
-                        channel_id
-                            .send_message(&ctx.http, |message| {
-                                message.content("This is a test");
-
-                                if roles.is_empty() {
-                                    return message;
+                        let add_components = |components: &mut CreateComponents| {
+                            components.create_action_row(|row| {
+                                for role in &roles {
+                                    row.create_button(|button| {
+                                        button
+                                            .label(role.name.clone())
+                                            .style(ButtonStyle::Primary)
+                                            .custom_id(role.id.to_string())
+                                    });
                                 }
 
-                                message.components(|components| {
-                                    components.create_action_row(|row| {
-                                        for role in roles {
-                                            row.create_button(|button| {
-                                                button
-                                                    .label(role.name.clone())
-                                                    .style(ButtonStyle::Primary)
-                                                    .custom_id(role.id.to_string())
-                                            });
-                                        }
+                                row
+                            });
+                        };
 
-                                        row
-                                    })
+                        let button_message = database.button_message();
+                        if let Some(button_message) = button_message {
+                            button_message
+                                .edit(&ctx.http, |message| {
+                                    if !roles.is_empty() {
+                                        message.components(|components| {
+                                            add_components(components);
+                                            components
+                                        });
+                                    }
+                                    message
                                 })
-                            })
-                            .await?;
+                                .await?;
+                        } else {
+                            let message = self
+                                .channel_id
+                                .send_message(&ctx.http, |message| {
+                                    message.content("Choose a role:");
+
+                                    if !roles.is_empty() {
+                                        message.components(|components| {
+                                            add_components(components);
+                                            components
+                                        });
+                                    }
+
+                                    message
+                                })
+                                .await?;
+
+                            *button_message = Some(message);
+                        }
 
                         format!("Toggled button for {} role.", role.name)
                     } else {

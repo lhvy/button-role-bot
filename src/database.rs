@@ -1,6 +1,9 @@
 use etcetera::app_strategy::{AppStrategy, AppStrategyArgs, Xdg};
 use serde::{Deserialize, Serialize};
-use serenity::model::id::{GuildId, RoleId};
+use serenity::model::{
+    channel::Message,
+    id::{GuildId, RoleId},
+};
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -11,6 +14,7 @@ use tokio::fs;
 pub(crate) struct Database {
     path: PathBuf,
     guilds: HashMap<GuildId, HashSet<RoleId>>,
+    button_message: Option<Message>,
 }
 
 impl Database {
@@ -28,6 +32,7 @@ impl Database {
         let empty_db = Database {
             path,
             guilds: HashMap::new(),
+            button_message: None,
         };
 
         empty_db.save().await?;
@@ -37,9 +42,13 @@ impl Database {
 
     async fn read(path: PathBuf) -> anyhow::Result<Database> {
         let bytes = fs::read(&path).await?;
-        let guilds = serde_json::from_slice(&bytes)?;
+        let database = serde_json::from_slice(&bytes)?;
 
-        Ok(Database { path, guilds })
+        Ok(database)
+    }
+
+    pub(crate) fn button_message(&mut self) -> &mut Option<Message> {
+        &mut self.button_message
     }
 
     pub(crate) fn guild_roles(&mut self, guild: GuildId) -> &HashSet<RoleId> {
@@ -69,7 +78,7 @@ impl Database {
     }
 
     async fn save(&self) -> anyhow::Result<()> {
-        let bytes = serde_json::to_vec(&self.guilds)?;
+        let bytes = serde_json::to_vec(&self)?;
         fs::write(&self.path, bytes).await?;
 
         Ok(())
