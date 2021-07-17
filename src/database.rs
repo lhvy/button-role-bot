@@ -7,7 +7,7 @@ use std::{
 };
 use tokio::fs;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Database {
     path: PathBuf,
     guilds: HashMap<GuildId, HashSet<RoleId>>,
@@ -42,7 +42,7 @@ impl Database {
         Ok(Database { path, guilds })
     }
 
-    pub(crate) async fn guild_roles(&mut self, guild: GuildId) -> &HashSet<RoleId> {
+    pub(crate) fn guild_roles(&mut self, guild: GuildId) -> &HashSet<RoleId> {
         self.guilds.entry(guild).or_default()
     }
 
