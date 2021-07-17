@@ -1,7 +1,10 @@
 use etcetera::app_strategy::{AppStrategy, AppStrategyArgs, Xdg};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
-use serenity::model::{channel::Message, id::RoleId};
+use serenity::model::{
+    channel::Message,
+    id::{ChannelId, RoleId},
+};
 use std::path::PathBuf;
 use tokio::fs;
 
@@ -68,6 +71,11 @@ impl Database {
 
         Ok(())
     }
+}
+
+struct GuildData {
+    roles: IndexSet<RoleId>,
+    channel: ChannelId,
 }
 
 fn path() -> anyhow::Result<PathBuf> {

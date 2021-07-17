@@ -19,19 +19,16 @@ use tokio::sync::Mutex;
 pub struct Handler {
     database: Mutex<Database>,
     guild_id: GuildId,
-    channel_id: ChannelId,
 }
 
 impl Handler {
     pub async fn new() -> anyhow::Result<Self> {
         let database = Database::load().await?;
         let guild_id = GuildId(env::var("GUILD_ID")?.parse()?);
-        let channel_id = ChannelId(env::var("CHANNEL_ID")?.parse()?);
 
         Ok(Self {
             database: Mutex::new(database),
             guild_id,
-            channel_id,
         })
     }
 
@@ -40,18 +37,31 @@ impl Handler {
 
         self.guild_id
             .create_application_commands(&ctx.http, |commands| {
-                commands.create_application_command(|command| {
-                    command
-                        .name("role")
-                        .description("Toggle a role button")
-                        .create_option(|option| {
-                            option
-                                .name("role")
-                                .description("The role to toggle")
-                                .kind(ApplicationCommandOptionType::Role)
-                                .required(true)
-                        })
-                })
+                commands
+                    .create_application_command(|command| {
+                        command
+                            .name("role")
+                            .description("Toggle a role button")
+                            .create_option(|option| {
+                                option
+                                    .name("role")
+                                    .description("The role to toggle")
+                                    .kind(ApplicationCommandOptionType::Role)
+                                    .required(true)
+                            })
+                    })
+                    .create_application_command(|command| {
+                        command
+                            .name("channel")
+                            .description("Pick the channel for the buttons")
+                            .create_option(|option| {
+                                option
+                                    .name("channel")
+                                    .description("The channel for the buttons message")
+                                    .kind(ApplicationCommandOptionType::Channel)
+                                    .required(true)
+                            })
+                    })
             })
             .await?;
 
@@ -86,6 +96,7 @@ impl Handler {
 
         let content = match data.name.as_str() {
             "role" => self.role_slash_command(data, &interaction, &ctx).await?,
+            "channel" => self.channel_slash_command(data, &interaction, &ctx).await?,
             _ => unreachable!(),
         };
 
@@ -230,5 +241,23 @@ impl Handler {
         }
 
         Ok(format!("Toggled button for {} role.", role.name))
+    }
+
+    async fn channel_slash_command(
+        &self,
+        data: &ApplicationCommandInteractionData,
+        interaction: &Interaction,
+        ctx: &Context,
+    ) -> anyhow::Result<String> {
+        let option_value = data.options[0].resolved.as_ref().unwrap();
+
+        let channel =
+            if let ApplicationCommandInteractionDataOptionValue::Channel(channel) = option_value {
+                channel
+            } else {
+                unreachable!()
+            };
+
+        Ok(format!("Set button channel to {}.", channel.name))
     }
 }
