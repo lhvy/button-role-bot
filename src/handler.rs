@@ -6,9 +6,10 @@ use serenity::{
         gateway::Ready,
         id::{ChannelId, GuildId, RoleId},
         interactions::{
-            ApplicationCommandInteractionDataOptionValue, ApplicationCommandOptionType,
-            ButtonStyle, Interaction, InteractionApplicationCommandCallbackDataFlags,
-            InteractionData, InteractionResponseType, InteractionType,
+            ApplicationCommandInteractionData, ApplicationCommandInteractionDataOptionValue,
+            ApplicationCommandOptionType, ButtonStyle, Interaction,
+            InteractionApplicationCommandCallbackDataFlags, InteractionData,
+            InteractionResponseType, InteractionType,
         },
     },
 };
@@ -89,80 +90,7 @@ impl Handler {
 
         let content = match data.name.as_str() {
             "ping" => "pong".to_string(),
-            "role" => {
-                let option_value = data.options[0].resolved.as_ref().unwrap();
-
-                if let ApplicationCommandInteractionDataOptionValue::Role(role) = option_value {
-                    if let Some(guild) = interaction.guild_id {
-                        let mut database = self.database.lock().await;
-                        database.toggle_role(guild, role.id).await?;
-
-                        let roles = {
-                            let guild_roles = database.guild_roles(self.guild_id);
-                            let mut roles = Vec::with_capacity(guild_roles.len());
-                            for role_id in guild_roles.iter().copied() {
-                                roles.push(role_id.to_role_cached(&ctx.cache).await.unwrap());
-                            }
-
-                            roles
-                        };
-
-                        let add_components = |components: &mut CreateComponents| {
-                            components.create_action_row(|row| {
-                                for role in &roles {
-                                    row.create_button(|button| {
-                                        button
-                                            .label(role.name.clone())
-                                            .style(ButtonStyle::Primary)
-                                            .custom_id(role.id.to_string())
-                                    });
-                                }
-
-                                row
-                            });
-                        };
-
-                        let button_message = database.button_message();
-                        if let Some(button_message) = button_message {
-                            button_message
-                                .edit(&ctx.http, |message| {
-                                    if !roles.is_empty() {
-                                        message.components(|components| {
-                                            add_components(components);
-                                            components
-                                        });
-                                    }
-                                    message
-                                })
-                                .await?;
-                        } else {
-                            let message = self
-                                .channel_id
-                                .send_message(&ctx.http, |message| {
-                                    message.content("Choose a role:");
-
-                                    if !roles.is_empty() {
-                                        message.components(|components| {
-                                            add_components(components);
-                                            components
-                                        });
-                                    }
-
-                                    message
-                                })
-                                .await?;
-
-                            *button_message = Some(message);
-                        }
-
-                        format!("Toggled button for {} role.", role.name)
-                    } else {
-                        "This command can only be used in servers.".to_string()
-                    }
-                } else {
-                    unreachable!()
-                }
-            }
+            "role" => self.role_slash_command(data, &interaction, &ctx).await?,
             _ => unreachable!(),
         };
 
@@ -220,5 +148,98 @@ impl Handler {
             .await?;
 
         Ok(())
+    }
+
+    async fn role_slash_command(
+        &self,
+        data: &ApplicationCommandInteractionData,
+        interaction: &Interaction,
+        ctx: &Context,
+    ) -> anyhow::Result<String> {
+        let option_value = data.options[0].resolved.as_ref().unwrap();
+
+        let role = if let ApplicationCommandInteractionDataOptionValue::Role(role) = option_value {
+            role
+        } else {
+            unreachable!()
+        };
+
+        let guild = if let Some(guild) = interaction.guild_id {
+            guild
+        } else {
+            return Ok("This command can only be used in servers.".to_string());
+        };
+
+        // interaction.member is always Some,
+        // since this command only works when in a guild
+        let member = interaction.member.as_ref().unwrap();
+
+        let has_admin = member.permissions(&ctx).await?.administrator();
+        if !has_admin {
+            return Ok("You must be admin to toggle a role!".to_string());
+        }
+
+        let mut database = self.database.lock().await;
+        database.toggle_role(guild, role.id).await?;
+
+        let roles = {
+            let guild_roles = database.guild_roles(self.guild_id);
+            let mut roles = Vec::with_capacity(guild_roles.len());
+            for role_id in guild_roles.iter().copied() {
+                roles.push(role_id.to_role_cached(&ctx.cache).await.unwrap());
+            }
+
+            roles
+        };
+
+        let add_components = |components: &mut CreateComponents| {
+            components.create_action_row(|row| {
+                for role in &roles {
+                    row.create_button(|button| {
+                        button
+                            .label(role.name.clone())
+                            .style(ButtonStyle::Primary)
+                            .custom_id(role.id.to_string())
+                    });
+                }
+
+                row
+            });
+        };
+
+        let button_message = database.button_message();
+        if let Some(button_message) = button_message {
+            button_message
+                .edit(&ctx.http, |message| {
+                    if !roles.is_empty() {
+                        message.components(|components| {
+                            add_components(components);
+                            components
+                        });
+                    }
+                    message
+                })
+                .await?;
+        } else {
+            let message = self
+                .channel_id
+                .send_message(&ctx.http, |message| {
+                    message.content("Choose a role:");
+
+                    if !roles.is_empty() {
+                        message.components(|components| {
+                            add_components(components);
+                            components
+                        });
+                    }
+
+                    message
+                })
+                .await?;
+
+            *button_message = Some(message);
+        }
+
+        Ok(format!("Toggled button for {} role.", role.name))
     }
 }
