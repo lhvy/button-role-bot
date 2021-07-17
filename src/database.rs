@@ -1,19 +1,17 @@
 use etcetera::app_strategy::{AppStrategy, AppStrategyArgs, Xdg};
+use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use serenity::model::{
     channel::Message,
     id::{GuildId, RoleId},
 };
-use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-};
+use std::{collections::HashMap, path::PathBuf};
 use tokio::fs;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Database {
     path: PathBuf,
-    guilds: HashMap<GuildId, HashSet<RoleId>>,
+    guilds: HashMap<GuildId, IndexSet<RoleId>>,
     button_message: Option<Message>,
 }
 
@@ -51,7 +49,7 @@ impl Database {
         &mut self.button_message
     }
 
-    pub(crate) fn guild_roles(&mut self, guild: GuildId) -> &HashSet<RoleId> {
+    pub(crate) fn guild_roles(&mut self, guild: GuildId) -> &IndexSet<RoleId> {
         self.guilds.entry(guild).or_default()
     }
 
