@@ -40,22 +40,18 @@ impl Handler {
 
         self.guild_id
             .create_application_commands(&ctx.http, |commands| {
-                commands
-                    .create_application_command(|command| {
-                        command.name("ping").description("A ping command")
-                    })
-                    .create_application_command(|command| {
-                        command
-                            .name("role")
-                            .description("Toggle a role button")
-                            .create_option(|option| {
-                                option
-                                    .name("role")
-                                    .description("The role to toggle")
-                                    .kind(ApplicationCommandOptionType::Role)
-                                    .required(true)
-                            })
-                    })
+                commands.create_application_command(|command| {
+                    command
+                        .name("role")
+                        .description("Toggle a role button")
+                        .create_option(|option| {
+                            option
+                                .name("role")
+                                .description("The role to toggle")
+                                .kind(ApplicationCommandOptionType::Role)
+                                .required(true)
+                        })
+                })
             })
             .await?;
 
@@ -89,7 +85,6 @@ impl Handler {
             };
 
         let content = match data.name.as_str() {
-            "ping" => "pong".to_string(),
             "role" => self.role_slash_command(data, &interaction, &ctx).await?,
             _ => unreachable!(),
         };
