@@ -219,7 +219,7 @@ impl Handler {
             let message = self
                 .channel_id
                 .send_message(&ctx.http, |message| {
-                    message.content("Choose some roles:");
+                    message.content("Choose your roles:");
 
                     if !roles.is_empty() {
                         message.components(|components| {
