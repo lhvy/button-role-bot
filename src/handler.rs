@@ -4,6 +4,7 @@ use serenity::{
     client::Context,
     model::{
         gateway::Ready,
+        guild::Role,
         id::{ChannelId, GuildId, RoleId},
         interactions::{
             ApplicationCommandInteractionData, ApplicationCommandInteractionDataOptionValue,
@@ -19,19 +20,16 @@ use tokio::sync::Mutex;
 pub struct Handler {
     database: Mutex<Database>,
     guild_id: GuildId,
-    channel_id: ChannelId,
 }
 
 impl Handler {
     pub async fn new() -> anyhow::Result<Self> {
         let database = Database::load().await?;
         let guild_id = GuildId(env::var("GUILD_ID")?.parse()?);
-        let channel_id = ChannelId(env::var("CHANNEL_ID")?.parse()?);
 
         Ok(Self {
             database: Mutex::new(database),
             guild_id,
-            channel_id,
         })
     }
 
@@ -40,18 +38,31 @@ impl Handler {
 
         self.guild_id
             .create_application_commands(&ctx.http, |commands| {
-                commands.create_application_command(|command| {
-                    command
-                        .name("role")
-                        .description("Toggle a role button")
-                        .create_option(|option| {
-                            option
-                                .name("role")
-                                .description("The role to toggle")
-                                .kind(ApplicationCommandOptionType::Role)
-                                .required(true)
-                        })
-                })
+                commands
+                    .create_application_command(|command| {
+                        command
+                            .name("role")
+                            .description("Toggle a role button")
+                            .create_option(|option| {
+                                option
+                                    .name("role")
+                                    .description("The role to toggle")
+                                    .kind(ApplicationCommandOptionType::Role)
+                                    .required(true)
+                            })
+                    })
+                    .create_application_command(|command| {
+                        command
+                            .name("channel")
+                            .description("Pick the channel for the buttons")
+                            .create_option(|option| {
+                                option
+                                    .name("channel")
+                                    .description("The channel for the buttons message")
+                                    .kind(ApplicationCommandOptionType::Channel)
+                                    .required(true)
+                            })
+                    })
             })
             .await?;
 
@@ -86,6 +97,7 @@ impl Handler {
 
         let content = match data.name.as_str() {
             "role" => self.role_slash_command(data, &interaction, &ctx).await?,
+            "channel" => self.channel_slash_command(data, &ctx).await?,
             _ => unreachable!(),
         };
 
@@ -171,64 +183,137 @@ impl Handler {
         let mut database = self.database.lock().await;
         database.toggle_role(role.id).await?;
 
-        let roles = {
-            let roles = database.roles();
-            let mut vec = Vec::with_capacity(roles.len());
-            for role_id in roles.iter().copied() {
-                vec.push(role_id.to_role_cached(&ctx.cache).await.unwrap());
+        let roles = roles(database.roles().iter().copied(), ctx).await;
+
+        let mut was_there_channel = true;
+
+        match (database.button_message_id(), database.channel_id()) {
+            (Some(button_message_id), Some(channel_id)) => {
+                let mut button_message = ctx
+                    .http
+                    .get_message(channel_id.0, button_message_id.0)
+                    .await?;
+
+                button_message
+                    .edit(&ctx.http, |message| {
+                        if !roles.is_empty() {
+                            message.components(|components| {
+                                add_components(&roles, components);
+                                components
+                            });
+                        }
+                        message
+                    })
+                    .await?;
             }
 
-            vec
-        };
+            (None, Some(channel_id)) => {
+                self.send_button_message(ctx, &mut *database, channel_id, &roles)
+                    .await?;
+            }
 
-        let add_components = |components: &mut CreateComponents| {
-            components.create_action_row(|row| {
-                for role in &roles {
-                    row.create_button(|button| {
-                        button
-                            .label(role.name.clone())
-                            .style(ButtonStyle::Primary)
-                            .custom_id(role.id.to_string())
+            (None, None) => was_there_channel = false,
+
+            // we can never have a message
+            // but not a channel
+            (Some(_), None) => unreachable!(),
+        }
+
+        let mut output = format!("Toggled button for {} role.", role.name);
+
+        if !was_there_channel {
+            output.push_str("\nYou have not selected a channel. Choose one with /channel.");
+        }
+
+        Ok(output)
+    }
+
+    async fn channel_slash_command(
+        &self,
+        data: &ApplicationCommandInteractionData,
+        ctx: &Context,
+    ) -> anyhow::Result<String> {
+        let option_value = data.options[0].resolved.as_ref().unwrap();
+
+        let channel =
+            if let ApplicationCommandInteractionDataOptionValue::Channel(channel) = option_value {
+                channel
+            } else {
+                unreachable!()
+            };
+
+        let mut database = self.database.lock().await;
+
+        let button_message_id = database.button_message_id();
+        let channel_id = database.channel_id();
+
+        if let (Some(button_message_id), Some(channel_id)) = (button_message_id, channel_id) {
+            ctx.http
+                .delete_message(channel_id.0, button_message_id.0)
+                .await?;
+        }
+
+        database.set_channel_id(channel.id).await?;
+
+        let roles = roles(database.roles().iter().copied(), ctx).await;
+        self.send_button_message(ctx, &mut *database, channel.id, &roles)
+            .await?;
+
+        Ok(format!("Set button channel to {}.", channel.name))
+    }
+
+    async fn send_button_message(
+        &self,
+        ctx: &Context,
+        database: &mut Database,
+        channel: ChannelId,
+        roles: &[Role],
+    ) -> anyhow::Result<()> {
+        let message = channel
+            .send_message(&ctx.http, |message| {
+                message.content("Choose your roles:");
+
+                if !roles.is_empty() {
+                    message.components(|components| {
+                        add_components(roles, components);
+                        components
                     });
                 }
 
-                row
+                message
+            })
+            .await?;
+
+        database.set_button_message_id(message.id).await?;
+
+        Ok(())
+    }
+}
+
+async fn roles(
+    role_ids: impl Iterator<Item = RoleId> + ExactSizeIterator,
+    ctx: &Context,
+) -> Vec<Role> {
+    let mut vec = Vec::with_capacity(role_ids.len());
+
+    for role_id in role_ids {
+        vec.push(role_id.to_role_cached(&ctx.cache).await.unwrap());
+    }
+
+    vec
+}
+
+fn add_components(roles: &[Role], components: &mut CreateComponents) {
+    components.create_action_row(|row| {
+        for role in roles {
+            row.create_button(|button| {
+                button
+                    .label(role.name.clone())
+                    .style(ButtonStyle::Primary)
+                    .custom_id(role.id.to_string())
             });
-        };
-
-        let button_message = database.button_message();
-        if let Some(button_message) = button_message {
-            button_message
-                .edit(&ctx.http, |message| {
-                    if !roles.is_empty() {
-                        message.components(|components| {
-                            add_components(components);
-                            components
-                        });
-                    }
-                    message
-                })
-                .await?;
-        } else {
-            let message = self
-                .channel_id
-                .send_message(&ctx.http, |message| {
-                    message.content("Choose your roles:");
-
-                    if !roles.is_empty() {
-                        message.components(|components| {
-                            add_components(components);
-                            components
-                        });
-                    }
-
-                    message
-                })
-                .await?;
-
-            *button_message = Some(message);
         }
 
-        Ok(format!("Toggled button for {} role.", role.name))
-    }
+        row
+    });
 }

@@ -1,7 +1,7 @@
 use etcetera::app_strategy::{AppStrategy, AppStrategyArgs, Xdg};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
-use serenity::model::{channel::Message, id::RoleId};
+use serenity::model::id::{ChannelId, MessageId, RoleId};
 use std::path::PathBuf;
 use tokio::fs;
 
@@ -9,7 +9,8 @@ use tokio::fs;
 pub(crate) struct Database {
     path: PathBuf,
     roles: IndexSet<RoleId>,
-    button_message: Option<Message>,
+    channel_id: Option<ChannelId>,
+    button_message_id: Option<MessageId>,
 }
 
 impl Database {
@@ -27,7 +28,8 @@ impl Database {
         let empty_db = Database {
             path,
             roles: IndexSet::new(),
-            button_message: None,
+            channel_id: None,
+            button_message_id: None,
         };
 
         empty_db.save().await?;
@@ -42,12 +44,30 @@ impl Database {
         Ok(database)
     }
 
-    pub(crate) fn button_message(&mut self) -> &mut Option<Message> {
-        &mut self.button_message
-    }
-
     pub(crate) fn roles(&self) -> &IndexSet<RoleId> {
         &self.roles
+    }
+
+    pub(crate) fn button_message_id(&self) -> Option<MessageId> {
+        self.button_message_id
+    }
+
+    pub(crate) async fn set_button_message_id(&mut self, id: MessageId) -> anyhow::Result<()> {
+        self.button_message_id = Some(id);
+        self.save().await?;
+
+        Ok(())
+    }
+
+    pub(crate) fn channel_id(&self) -> Option<ChannelId> {
+        self.channel_id
+    }
+
+    pub(crate) async fn set_channel_id(&mut self, id: ChannelId) -> anyhow::Result<()> {
+        self.channel_id = Some(id);
+        self.save().await?;
+
+        Ok(())
     }
 
     pub(crate) async fn toggle_role(&mut self, role: RoleId) -> anyhow::Result<()> {
@@ -68,6 +88,12 @@ impl Database {
 
         Ok(())
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct GuildData {
+    roles: IndexSet<RoleId>,
+    channel: Option<ChannelId>,
 }
 
 fn path() -> anyhow::Result<PathBuf> {
