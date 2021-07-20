@@ -159,12 +159,6 @@ impl Handler {
             unreachable!()
         };
 
-        let guild = if let Some(guild) = interaction.guild_id {
-            guild
-        } else {
-            return Ok("This command can only be used in servers.".to_string());
-        };
-
         // interaction.member is always Some,
         // since this command only works when in a guild
         let member = interaction.member.as_ref().unwrap();
@@ -175,16 +169,16 @@ impl Handler {
         }
 
         let mut database = self.database.lock().await;
-        database.toggle_role(guild, role.id).await?;
+        database.toggle_role(role.id).await?;
 
         let roles = {
-            let guild_roles = database.guild_roles(self.guild_id);
-            let mut roles = Vec::with_capacity(guild_roles.len());
-            for role_id in guild_roles.iter().copied() {
-                roles.push(role_id.to_role_cached(&ctx.cache).await.unwrap());
+            let roles = database.roles();
+            let mut vec = Vec::with_capacity(roles.len());
+            for role_id in roles.iter().copied() {
+                vec.push(role_id.to_role_cached(&ctx.cache).await.unwrap());
             }
 
-            roles
+            vec
         };
 
         let add_components = |components: &mut CreateComponents| {

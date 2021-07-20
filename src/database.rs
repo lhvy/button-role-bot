@@ -1,17 +1,14 @@
 use etcetera::app_strategy::{AppStrategy, AppStrategyArgs, Xdg};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
-use serenity::model::{
-    channel::Message,
-    id::{GuildId, RoleId},
-};
-use std::{collections::HashMap, path::PathBuf};
+use serenity::model::{channel::Message, id::RoleId};
+use std::path::PathBuf;
 use tokio::fs;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Database {
     path: PathBuf,
-    guilds: HashMap<GuildId, IndexSet<RoleId>>,
+    roles: IndexSet<RoleId>,
     button_message: Option<Message>,
 }
 
@@ -29,7 +26,7 @@ impl Database {
 
         let empty_db = Database {
             path,
-            guilds: HashMap::new(),
+            roles: IndexSet::new(),
             button_message: None,
         };
 
@@ -49,30 +46,20 @@ impl Database {
         &mut self.button_message
     }
 
-    pub(crate) fn guild_roles(&mut self, guild: GuildId) -> &IndexSet<RoleId> {
-        self.guilds.entry(guild).or_default()
+    pub(crate) fn roles(&self) -> &IndexSet<RoleId> {
+        &self.roles
     }
 
-    pub(crate) async fn toggle_role(&mut self, guild: GuildId, role: RoleId) -> anyhow::Result<()> {
-        let guild_roles = self.guilds.entry(guild).or_default();
-        if guild_roles.contains(&role) {
-            guild_roles.remove(&role);
+    pub(crate) async fn toggle_role(&mut self, role: RoleId) -> anyhow::Result<()> {
+        if self.roles.contains(&role) {
+            self.roles.remove(&role);
         } else {
-            guild_roles.insert(role);
+            self.roles.insert(role);
         }
 
-        self.clean();
         self.save().await?;
 
         Ok(())
-    }
-
-    fn clean(&mut self) {
-        for (guild, roles) in self.guilds.clone() {
-            if roles.is_empty() {
-                self.guilds.remove(&guild);
-            }
-        }
     }
 
     async fn save(&self) -> anyhow::Result<()> {
